@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1a1a2e">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Traffic Rush 🚗</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0f0f1e;font-family:system-ui,"Segoe UI",Tahoma,sans-serif;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;color:#fff}
+canvas{display:block;touch-action:none}
+#snd{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:10px;width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.15);color:#fff;font-size:20px;cursor:pointer;z-index:5;backdrop-filter:blur(8px)}
+.ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.7);z-index:4;padding:8px;backdrop-filter:blur(4px)}
+.ov[hidden]{display:none}
+.card{background:linear-gradient(160deg,#1e1e3a,#0f0f1e);color:#fff;border-radius:24px;padding:22px;width:100%;max-width:380px;max-height:94svh;overflow:auto;text-align:center;border:1px solid rgba(255,255,255,.1);box-shadow:0 20px 60px rgba(0,0,0,.6)}
+h1{margin:0 0 8px;font-size:30px;background:linear-gradient(135deg,#ff6b35,#f7931e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sc{font-size:44px;font-weight:900;min-height:52px;background:linear-gradient(135deg,#ffd93d,#ff6b35);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:6px 0}
+.bt{color:#a0a0c0;margin-bottom:14px;font-size:14px}
+.btn{font:inherit;font-size:20px;font-weight:800;border:0;border-radius:16px;padding:14px 28px;background:linear-gradient(135deg,#ff6b35,#f7931e);color:#fff;cursor:pointer;width:100%;box-shadow:0 8px 20px rgba(255,107,53,.4);transition:transform .1s}
+.btn:active{transform:scale(.97)}
+.btn.sm{font-size:14px;font-weight:600;background:rgba(255,255,255,.1);color:#fff;padding:8px 14px;width:auto;box-shadow:none;border:1px solid rgba(255,255,255,.15)}
+.how{font-size:13px;color:#a0a0c0;margin:14px 0;line-height:1.6}
+h2{font-size:16px;margin:16px 0 8px;color:#ffd93d}
+.lb{font-size:14px;text-align:right;min-height:24px}
+.lb div{display:flex;justify-content:space-between;padding:8px 10px;border-radius:10px;margin-bottom:4px;background:rgba(255,255,255,.05)}
+.lb div:first-child{background:linear-gradient(90deg,rgba(255,215,61,.2),rgba(255,107,53,.2));font-weight:800;border:1px solid rgba(255,215,61,.3)}
+.muted{font-size:13px;color:#a0a0c0;margin:8px 0}
+.coins{display:inline-block;background:linear-gradient(135deg,#ffd93d,#f7931e);color:#1a1a2e;font-weight:900;padding:4px 12px;border-radius:20px;font-size:14px;margin:4px}
+:focus-visible{outline:3px solid #ff6b35;outline-offset:2px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="snd" type="button" aria-label="الصوت">🔊</button>
+<div class="ov" id="ov">
+  <div class="card">
+    <h1>Traffic Rush 🚗</h1>
+    <div class="sc" id="os"></div>
+    <div class="bt" id="ob"></div>
+    <button class="btn" id="pl" type="button">ابدأ القيادة</button>
+    <div class="how">اسحب يمين/شمال للتبديل بين المسارات. اجمع البنزين ⛽ والعملات 🪙. تجنب السيارات 🚙!</div>
+    <div id="stats"></div>
+    <h2>🏆 لوحة المتصدرين</h2>
+    <div class="lb" id="lb">محتاجة إنترنت.</div>
+    <div id="acc"></div>
+  </div>
+</div>
+
+<script>
+var $=function(i){return document.getElementById(i)};
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+
+var cv=$("c"),x=cv.getContext("2d"),W,H,dpr,roadY,roadH,cx,LS;
+function rs(){
+  dpr=Math.min(window.devicePixelRatio||1,2);
+  W=innerWidth;H=innerHeight;
+  cv.width=W*dpr;cv.height=H*dpr;
+  cv.style.width=W+"px";cv.style.height=H+"px";
+  x.setTransform(dpr,0,0,dpr,0,0);
+  cx=W/2;
+  LS=Math.min(W*.28,H*.13);
+  roadY=H*.05;roadH=H*.95;
+}
+addEventListener("resize",rs);rs();
+
+var st="menu",t=0,dist=0,speed=20,lane=0,px=0,shake=0,score=0,best=0,level=1,banner=0,mute=false,lastTs=0;
+var cars=[],pickups=[],effects=[],coinCount=0;
+var totalCoins=0;
+var gas=1;
+var nitro=0;
+try{
+  best=+localStorage.getItem("tr_best")||0;
+  mute=localStorage.getItem("tr_mute")==="1";
+  totalCoins=+localStorage.getItem("tr_coins")||0;
+}catch(e){}
+
+var CAR_COLORS=[
+  {body:"#e74c3c",dark:"#a93226",roof:"#c0392b"},
+  {body:"#3498db",dark:"#21618c",roof:"#2980b9"},
+  {body:"#2ecc71",dark:"#1e8449",roof:"#27ae60"},
+  {body:"#f39c12",dark:"#b9770e",roof:"#d68910"},
+  {body:"#9b59b6",dark:"#6c3483",roof:"#8e44ad"},
+  {body:"#1abc9c",dark:"#117a65",roof:"#16a085"},
+  {body:"#ecf0f1",dark:"#bdc3c7",roof:"#d5dbdb"},
+  {body:"#34495e",dark:"#1b2631",roof:"#2c3e50"}
+];
+
+var AC=null;
+function au(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==="suspended")AC.resume()}
+function tone(f1,f2,d,ty,vol){
+  if(mute||!AC)return;
+  var o=AC.createOscillator(),g=AC.createGain(),n=AC.currentTime;
+  o.type=ty||"sine";
+  o.frequency.setValueAtTime(f1,n);
+  o.frequency.exponentialRampToValueAtTime(Math.max(1,f2),n+d);
+  g.gain.setValueAtTime(vol||.1,n);
+  g.gain.exponentialRampToValueAtTime(.001,n+d);
+  o.connect(g);g.connect(AC.destination);
+  o.start();o.stop(n+d);
+}
+var SFX={
+  move:function(){tone(520,600,.06,"sine",.05)},
+  coin:function(){tone(880,1320,.1,"square",.05);setTimeout(function(){tone(1320,1760,.08,"square",.04)},70)},
+  gas:function(){tone(300,500,.15,"triangle",.08)},
+  hit:function(){tone(200,40,.5,"sawtooth",.18)},
+  level:function(){tone(660,880,.12,"square",.06);setTimeout(function(){tone(880,1100,.15,"square",.06)},100)},
+  nitro:function(){tone(400,1200,.3,"sawtooth",.08)}
+};
+function sndIcon(){$("snd").textContent=mute?"🔇":"🔊"}
+$("snd").onclick=function(e){e.stopPropagation();mute=!mute;try{localStorage.setItem("tr_mute",mute?"1":"0")}catch(er){}sndIcon();au()};
+sndIcon();
+
+function go(d){
+  if(st!=="play")return;
+  var n=Math.max(-1,Math.min(1,lane+d));
+  if(n!==lane){lane=n;SFX.move()}
+}
+function useNitro(){
+  if(st!=="play"||nitro>0)return;
+  nitro=1.5;SFX.nitro();
+  for(var i=0;i<20;i++){
+    effects.push({x:cx+px*LS,y:H*.8,vx:(Math.random()-.5)*200,vy:100+Math.random()*100,life:.5,color:"#ffd93d"});
+  }
+}
+
+var sx=0,sy=0,lastAct=0;
+cv.addEventListener("touchstart",function(e){
+  var p=e.touches[0];sx=p.clientX;sy=p.clientY;
+},{passive:true});
+cv.addEventListener("touchmove",function(e){
+  e.preventDefault();
+  if(st!=="play")return;
+  var p=e.touches[0],dx=p.clientX-sx,dy=p.clientY-sy,n=Date.now();
+  if(Math.abs(dx)<20&&Math.abs(dy)<20)return;
+  if(n-lastAct<100)return;
+  lastAct=n;sx=p.clientX;sy=p.clientY;
+  if(Math.abs(dx)>Math.abs(dy))go(dx>0?1:-1);
+  else if(dy<-60)useNitro();
+},{passive:false});
+
+cv.addEventListener("dblclick",function(){useNitro()});
+
+document.addEventListener("keydown",function(e){
+  var k=e.key;
+  if(k==="ArrowLeft")go(-1);
+  else if(k==="ArrowRight")go(1);
+  else if(k===" "||k==="ArrowUp")useNitro();
+  else if(k==="Enter"&&st!=="play")start();
+});
+  function spawnCar(){
+  var l=Math.floor(Math.random()*3)-1;
+  var c=CAR_COLORS[Math.floor(Math.random()*CAR_COLORS.length)];
+  var baseSpeed=speed*(0.7+Math.random()*0.4);
+  cars.push({
+    l:l,
+    d:90,
+    pd:90,
+    speed:baseSpeed,
+    color:c,
+    type:Math.random()<0.15?"truck":"car"
+  });
+}
+
+function spawnPickup(){
+  var l=Math.floor(Math.random()*3)-1;
+  var type=Math.random()<0.15?"gas":"coin";
+  pickups.push({
+    l:l,
+    d:90,
+    pd:90,
+    type:type,
+    phase:Math.random()*Math.PI*2,
+    collected:false
+  });
+}
+
+function start(){
+  au();
+  st="play";t=0;dist=0;speed=20;lane=0;px=0;
+  cars=[];pickups=[];effects=[];
+  shake=0;score=0;level=1;banner=0;
+  gas=1;nitro=0;coinCount=0;
+  $("ov").hidden=true;
+}
+
+function die(){
+  st="dead";SFX.hit();shake=1;
+  try{if(navigator.vibrate)navigator.vibrate(100)}catch(e){}
+  var nb=score>best;
+  if(nb){best=score;try{localStorage.setItem("tr_best",String(best))}catch(e){}}
+  totalCoins+=coinCount;
+  try{localStorage.setItem("tr_coins",String(totalCoins))}catch(e){}
+  if(window.submitScore)window.submitScore(score);
+  setTimeout(function(){
+    $("ot").textContent=nb?"🏆 رقم قياسي جديد!":"💥 اصطدام!";
+    $("os").textContent=score;
+    $("ob").textContent="أعلى نتيجة: "+best;
+    $("pl").textContent="العب تاني";
+    $("stats").innerHTML='<div class="coins">🪙 '+coinCount+' عملة هذه الجولة</div> <div class="coins">💎 '+totalCoins+' إجمالي</div>';
+    $("ov").hidden=false;
+    if(window.lbRefresh)window.lbRefresh();
+  },700);
+}
+
+function update(dt){
+  if(st==="menu"||st==="dead"){
+    t+=dt;
+    if(shake>0)shake=Math.max(0,shake-dt*2.5);
+    return;
+  }
+
+  t+=dt;
+  if(banner>0)banner-=dt;
+  if(nitro>0)nitro-=dt;
+
+  speed=20+Math.min(50,score*0.015);
+  if(nitro>0)speed*=1.8;
+
+  var mv=speed*dt;
+  dist+=mv;
+  px+=(lane-px)*(1-Math.exp(-dt*18));
+
+  if(Math.random()<dt*Math.min(3,1+level*0.25))spawnCar();
+  if(Math.random()<dt*1.5)spawnPickup();
+
+  cars.forEach(function(c){
+    c.pd=c.d;
+    c.d-=mv*0.75+c.speed*dt*0.25;
+  });
+  cars=cars.filter(function(c){return c.d>-10});
+
+  pickups.forEach(function(p){
+    p.pd=p.d;
+    p.d-=mv;
+    p.phase+=dt*3;
+  });
+  pickups=pickups.filter(function(p){return p.d>-10&&!p.collected});
+
+  for(var i=0;i<cars.length;i++){
+    var c=cars[i];
+    if(c.d<1&&c.pd>-1){
+      if(Math.abs(c.l-px)<0.5){
+        if(nitro>0){
+          c.d=-100;
+          SFX.hit();
+          effects.push({x:cx+c.l*LS,y:H*0.5,vx:0,vy:0,life:.5,color:"#ff6b35",big:true});
+          score+=50;
+        }else{
+          die();return;
+        }
+      }
+    }
+  }
+
+  for(var j=0;j<pickups.length;j++){
+    var p=pickups[j];
+    if(!p.collected&&p.d<1&&p.pd>-1){
+      if(Math.abs(p.l-px)<0.5){
+        p.collected=true;
+        var yy=H*0.5;
+        if(p.type==="coin"){
+          coinCount++;
+          score+=10;
+          SFX.coin();
+          for(var k=0;k<8;k++){
+            effects.push({x:cx+p.l*LS,y:yy,vx:(Math.random()-.5)*200,vy:(Math.random()-.5)*200,life:.4,color:"#ffd93d"});
+          }
+        }else{
+          gas=Math.min(1,gas+0.3);
+          score+=5;
+          SFX.gas();
+          for(var k2=0;k2<10;k2++){
+            effects.push({x:cx+p.l*LS,y:yy,vx:(Math.random()-.5)*200,vy:(Math.random()-.5)*200,life:.5,color:"#2ecc71"});
+          }
+        }
+      }
+    }
+  }
+
+  gas-=dt*0.008;
+  if(gas<=0){die();return}
+
+  effects.forEach(function(e){
+    e.x+=e.vx*dt;
+    e.y+=e.vy*dt;
+    e.vy+=300*dt;
+    e.life-=dt;
+  });
+  effects=effects.filter(function(e){return e.life>0});
+
+  score=Math.floor(dist/3);
+  var nl=1+Math.floor(score/300);
+  if(nl>level){level=nl;banner=2;SFX.level()}
+}
+
+function rr(a,b,w,h,r){
+  x.beginPath();
+  if(x.roundRect)x.roundRect(a,b,w,h,r);
+  else x.rect(a,b,w,h);
+  x.fill();
+}
+
+function drawCar(c,s,y,isPlayer){
+  var w=LS*0.75*s;
+  var h=LS*1.15*s;
+  var carX=cx+c.l*LS*s;
+
+  x.save();
+  x.fillStyle="rgba(0,0,0,.4)";
+  x.beginPath();
+  x.ellipse(carX,y+4,w*.55,h*.08,0,0,7);
+  x.fill();
+
+  var grad=x.createLinearGradient(carX-w/2,0,carX+w/2,0);
+  grad.addColorStop(0,c.color.dark);
+  grad.addColorStop(.5,c.color.body);
+  grad.addColorStop(1,c.color.dark);
+  x.fillStyle=grad;
+  rr(carX-w/2,y-h,w,h,LS*.12*s);
+
+  x.fillStyle=c.color.roof;
+  rr(carX-w*.42,y-h*.85,w*.84,h*.45,LS*.08*s);
+
+  x.fillStyle="rgba(150,200,255,.7)";
+  rr(carX-w*.35,y-h*.78,w*.7,h*.15,LS*.04*s);
+
+  x.fillStyle="rgba(100,150,200,.6)";
+  rr(carX-w*.35,y-h*.5,w*.7,h*.15,LS*.04*s);
+
+  x.fillStyle="#fff8dc";
+  x.beginPath();
+  x.ellipse(carX-w*.3,y-h*.05,w*.1,h*.03,0,0,7);
+  x.ellipse(carX+w*.3,y-h*.05,w*.1,h*.03,0,0,7);
+  x.fill();
+
+  x.fillStyle="#ff3333";
+  x.beginPath();
+  x.ellipse(carX-w*.3,y-h*.97,w*.1,h*.025,0,0,7);
+  x.ellipse(carX+w*.3,y-h*.97,w*.1,h*.025,0,0,7);
+  x.fill();
+
+  if(isPlayer){
+    x.fillStyle="#ffd93d";
+    x.fillRect(carX-w*.05,y-h*.7,w*.1,h*.6);
+  }
+
+  x.restore();
+}
+
+function drawPickup(p,s,y){
+  var px2=cx+p.l*LS*s;
+  var bob=Math.sin(p.phase)*4*s;
+
+  x.save();
+  x.translate(px2,y-LS*.5*s+bob);
+
+  if(p.type==="coin"){
+    x.shadowColor="#ffd93d";
+    x.shadowBlur=20*s;
+    var grad=x.createRadialGradient(0,0,0,0,0,LS*.18*s);
+    grad.addColorStop(0,"#fff8dc");
+    grad.addColorStop(.5,"#ffd93d");
+    grad.addColorStop(1,"#f7931e");
+    x.fillStyle=grad;
+    x.beginPath();
+    x.ellipse(0,0,LS*.16*s,LS*.18*s,0,0,7);
+    x.fill();
+
+    x.fillStyle="#b9770e";
+    x.font="900 "+(LS*.22*s)+"px system-ui";
+    x.textAlign="center";
+    x.textBaseline="middle";
+    x.fillText("🪙",0,0);
+  }else{
+    x.shadowColor="#2ecc71";
+    x.shadowBlur=20*s;
+    x.fillStyle="#2ecc71";
+    rr(-LS*.15*s,-LS*.18*s,LS*.3*s,LS*.36*s,LS*.06*s);
+
+    x.fillStyle="#fff";
+    x.font="900 "+(LS*.16*s)+"px system-ui";
+    x.textAlign="center";
+    x.textBaseline="middle";
+    x.fillText("⛽",0,0);
+  }
+  x.restore();
+}
+
+function drawPlayer(){
+  var s=1;
+  var y=H*0.82;
+  var w=LS*0.78;
+  var h=LS*1.2;
+  var carX=cx+px*LS;
+
+  x.save();
+  x.fillStyle="rgba(0,0,0,.5)";
+  x.beginPath();
+  x.ellipse(carX,y+6,w*.55,h*.08,0,0,7);
+  x.fill();
+
+  if(nitro>0){
+    for(var i=0;i<3;i++){
+      var nw=w*(0.3-i*0.08);
+      var nh=h*(0.4+i*0.15);
+      x.fillStyle="rgba("+(255-i*60)+","+(200-i*50)+",0,"+(0.6-i*0.15)+")";
+      rr(carX-nw/2,y-h-nh*.5,nw,nh,LS*.1);
+    }
+  }
+
+  var grad=x.createLinearGradient(carX-w/2,0,carX+w/2,0);
+  grad.addColorStop(0,"#c0392b");
+  grad.addColorStop(.5,"#e74c3c");
+  grad.addColorStop(1,"#c0392b");
+  x.fillStyle=grad;
+  rr(carX-w/2,y-h,w,h,LS*.14);
+
+  x.fillStyle="#a93226";
+  rr(carX-w*.42,y-h*.85,w*.84,h*.45,LS*.09);
+
+  x.fillStyle="rgba(150,200,255,.75)";
+  rr(carX-w*.35,y-h*.78,w*.7,h*.15,LS*.05);
+
+  x.fillStyle="rgba(100,150,200,.65)";
+  rr(carX-w*.35,y-h*.5,w*.7,h*.15,LS*.05);
+
+  x.fillStyle="#ffd93d";
+  x.fillRect(carX-w*.06,y-h*.7,w*.12,h*.6);
+
+  x.fillStyle="#fff8dc";
+  x.shadowColor="#fff8dc";x.shadowBlur=15;
+  x.beginPath();
+  x.ellipse(carX-w*.3,y-h*.05,w*.1,h*.03,0,0,7);
+  x.ellipse(carX+w*.3,y-h*.05,w*.1,h*.03,0,0,7);
+  x.fill();
+  x.shadowBlur=0;
+
+  x.fillStyle="#ff3333";
+  x.shadowColor="#ff3333";x.shadowBlur=10;
+  x.beginPath();
+  x.ellipse(carX-w*.3,y-h*.97,w*.1,h*.025,0,0,7);
+  x.ellipse(carX+w*.3,y-h*.97,w*.1,h*.025,0,0,7);
+  x.fill();
+
+  x.restore();
+}
+
+function drawRoad(){
+  var skyG=x.createLinearGradient(0,0,0,H*.3);
+  skyG.addColorStop(0,"#0a0a1a");
+  skyG.addColorStop(1,"#1a1a3e");
+  x.fillStyle=skyG;
+  x.fillRect(0,0,W,H*.3);
+
+  x.fillStyle="#fff";
+  for(var i=0;i<40;i++){
+    var sx2=(i*137.5)%W;
+    var sy2=(i*73.3)%(H*.25);
+    var tw=Math.sin(t*2+i)*0.4+0.6;
+    x.globalAlpha=tw*0.8;
+    x.fillRect(sx2,sy2,2,2);
+  }
+  x.globalAlpha=1;
+
+  var roadG=x.createLinearGradient(0,roadY,0,roadH);
+  roadG.addColorStop(0,"#1a1a1a");
+  roadG.addColorStop(.5,"#2a2a2a");
+  roadG.addColorStop(1,"#1a1a1a");
+  x.fillStyle=roadG;
+  x.fillRect(0,roadY,W,roadH);
+
+  x.fillStyle="#f7931e";
+  x.fillRect(0,roadY,W,4);
+  x.fillRect(0,roadH-4,W,4);
+
+  var laneW=LS;
+  for(var l=-1;l<=1;l+=2){
+    var lx=cx+l*laneW*0.5;
+    x.fillStyle="#fff";
+    for(var dy=roadY;dy<roadH;dy+=60){
+      var ly=(dy+(dist*2)%60);
+      x.globalAlpha=Math.min(1,(ly-roadY)/(roadH-roadY)*2);
+      x.fillRect(lx-2,ly,4,30);
+    }
+    x.globalAlpha=1;
+  }
+}
+
+function drawEffects(){
+  effects.forEach(function(e){
+    x.globalAlpha=Math.max(0,e.life*2);
+    x.fillStyle=e.color;
+    x.beginPath();
+    x.arc(e.x,e.y,e.big?15:4,0,7);
+    x.fill();
+  });
+  x.globalAlpha=1;
+}
+
+function drawHUD(){
+  if(st!=="play")return;
+
+  x.textAlign="center";
+  x.font="900 40px system-ui,sans-serif";
+  x.lineWidth=6;
+  x.strokeStyle="rgba(0,0,0,.7)";
+  x.fillStyle="#ffd93d";
+  var ty=60;
+  x.strokeText(String(score),W/2,ty);
+  x
